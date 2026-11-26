@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -243,6 +244,62 @@ inline std::vector<std::byte> makeRavenBspRoomsFixture(bool separateVisibility =
         fixture.lumps[16][12] = std::byte{2};
     }
     return fixture.bytes();
+}
+
+// Entirely synthetic. A 256-unit lightmapped floor triangle whose corners sit on black luxels around a
+// bright pool, beside a vertex-lit triangle that shares its long edge. Luxels are 16 source units apart.
+inline raven_fixture::Fixture makeRavenLightPoolFixture()
+{
+    using namespace raven_fixture;
+    Fixture fixture;
+    writeFloat(fixture.lumps[7], 12, 256);
+    writeFloat(fixture.lumps[7], 16, 256);
+    writeFloat(fixture.lumps[7], 20, 0);
+    const std::array<std::array<float, 2>, 6> corners{{{0, 0}, {256, 0}, {0, 256}, {256, 0}, {256, 256}, {0, 256}}};
+    fixture.lumps[10].assign((corners.size() + 1) * 80, std::byte{});
+    for ( std::size_t i = 0; i < corners.size(); ++i )
+    {
+        const auto base = (i + 1) * 80;
+        writeFloat(fixture.lumps[10], base, corners[i][0]);
+        writeFloat(fixture.lumps[10], base + 4, corners[i][1]);
+        writeFloat(fixture.lumps[10], base + 12, corners[i][0] / 64);
+        writeFloat(fixture.lumps[10], base + 16, corners[i][1] / 64);
+        writeFloat(fixture.lumps[10], base + 20, (corners[i][0] / 16 + 0.5f) / 128);
+        writeFloat(fixture.lumps[10], base + 24, (corners[i][1] / 16 + 0.5f) / 128);
+        writeFloat(fixture.lumps[10], base + 60, 1);
+        for ( std::size_t channel = 0; channel < 3; ++channel )
+        {
+            fixture.lumps[10][base + 64 + channel] = std::byte{200};
+        }
+        fixture.lumps[10][base + 67] = std::byte{255};
+    }
+    fixture.lumps[11].assign(6 * 4, std::byte{});
+    for ( std::size_t i = 0; i < 6; ++i )
+    {
+        write32(fixture.lumps[11], i * 4, static_cast<std::uint32_t>(i % 3));
+    }
+    for ( std::size_t surface = 0; surface < 2; ++surface )
+    {
+        const auto base = surface * 148;
+        write32(fixture.lumps[13], base + 8, 1);
+        write32(fixture.lumps[13], base + 12, static_cast<std::uint32_t>(1 + 3 * surface));
+        write32(fixture.lumps[13], base + 16, 3);
+        write32(fixture.lumps[13], base + 20, static_cast<std::uint32_t>(3 * surface));
+        write32(fixture.lumps[13], base + 24, 3);
+        write32(fixture.lumps[13], base + 36, surface == 0 ? 0 : UINT32_MAX);
+        write32(fixture.lumps[13], base + 140, 0);
+        write32(fixture.lumps[13], base + 144, 0);
+    }
+    // Luxels 4 to 8 on both axes are white; the triangle's corner luxels (0, 0), (16, 0) and (0, 16) are black.
+    fixture.lumps[14].assign(128u * 128u * 3u, std::byte{});
+    for ( std::size_t y = 4; y <= 8; ++y )
+    {
+        for ( std::size_t x = 4; x <= 8; ++x )
+        {
+            std::fill_n(fixture.lumps[14].begin() + static_cast<std::ptrdiff_t>((y * 128 + x) * 3), 3, std::byte{255});
+        }
+    }
+    return fixture;
 }
 
 } // namespace sed::tests

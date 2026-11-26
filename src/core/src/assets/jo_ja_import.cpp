@@ -9,12 +9,14 @@
 #include "sed/assets/gob.hpp"
 #include "sed/assets/jkl.hpp"
 #include "sed/assets/jo_ja_hybrid_geometry.hpp"
+#include "sed/assets/jo_ja_lightmap_refine.hpp"
 #include "sed/assets/jo_ja_residual_mesh.hpp"
 #include "sed/assets/mat.hpp"
 #include "sed/assets/mat_write.hpp"
 #include "sed/assets/raven_lightmap.hpp"
 #include "sed/assets/tpl.hpp"
 #include "sed/float_chars.hpp"
+#include "sed/format_number.hpp"
 #include "sed/level/build.hpp"
 #include "sed/level/project_defaults.hpp"
 
@@ -166,6 +168,21 @@ void validateOptions(const JoJaImportOptions &options)
     if ( !options.nonCollidingShaders.empty() && (hybrid || !options.renderMeshCollision) )
     {
         refuse("nonCollidingShaders requires model-scene with renderMeshCollision enabled");
+    }
+    if ( options.lightmapRefinement )
+    {
+        if ( hybrid )
+        {
+            refuse("lightmapRefinement requires model-scene geometry");
+        }
+        try
+        {
+            validateJoJaLightmapRefinement(*options.lightmapRefinement);
+        }
+        catch ( const std::invalid_argument& error )
+        {
+            refuse(error.what());
+        }
     }
     if ( options.audioPolicy != JoJaAudioPolicy::StockEquivalents &&
          options.audioPolicy != JoJaAudioPolicy::SourceImport )
@@ -968,6 +985,13 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     };
     using Cell = std::tuple<int, int, int, std::string, bool>;
     std::map<Cell, std::vector<Triangle>> cells;
+    // Model-scene triangles in source order, bucketed into cells after optional lightmap refinement.
+    struct SceneTriangle
+    {
+        Triangle triangle;
+        bool visualOnly{};
+    };
+    std::vector<SceneTriangle> sceneTriangles;
     const bool useHybrid = options.geometryMode == JoJaGeometryMode::HybridSectors;
     std::vector<JoJaHybridTriangle> hybridTriangles;
     TVector low{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(),
@@ -1016,14 +1040,9 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
         result.triangles += triangles.size();
         for ( auto &triangle : triangles )
         {
-            TVector center{};
             for ( const auto &corner : triangle.corners )
             {
-                const auto point = scaled(corner.position, options.scale);
-                extend(low, high, point);
-                center.x += point.x / 3;
-                center.y += point.y / 3;
-                center.z += point.z / 3;
+                extend(low, high, scaled(corner.position, options.scale));
             }
             if ( useHybrid )
             {
@@ -1036,9 +1055,7 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
             }
             else
             {
-                const Cell cell{static_cast<int>(std::floor(center.x / 1.6)), static_cast<int>(std::floor(center.y / 1.6)),
-                                static_cast<int>(std::floor(center.z / 1.6)), result.materials[material].footstep, visualOnly};
-                cells[cell].push_back({std::move(triangle), material});
+                sceneTriangles.push_back({{std::move(triangle), material}, visualOnly});
             }
         }
     }
@@ -1054,6 +1071,55 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     {
         refuse("the world model has no convertible visible triangles");
     }
+    if ( options.lightmapRefinement )
+    {
+        std::vector<RavenBspTriangle> sources;
+        sources.reserve(sceneTriangles.size());
+        for ( const auto& entry : sceneTriangles )
+        {
+            sources.push_back(entry.triangle.source);
+        }
+        JoJaLightmapRefinementResult refined;
+        try
+        {
+            refined = refineJoJaLightmapTriangles(bsp, sources, *options.lightmapRefinement, options.maxTriangles);
+        }
+        catch ( const std::runtime_error& error )
+        {
+            refuse(error.what());
+        }
+        std::vector<SceneTriangle> children;
+        children.reserve(refined.triangles.size());
+        for ( std::size_t i = 0; i < refined.triangles.size(); ++i )
+        {
+            const auto& parent = sceneTriangles[refined.parents[i]];
+            children.push_back({{std::move(refined.triangles[i]), parent.triangle.material}, parent.visualOnly});
+        }
+        sceneTriangles = std::move(children);
+        result.trianglesBeforeRefinement = result.triangles;
+        result.triangles = sceneTriangles.size();
+        result.refinedSourceTriangles = refined.splitSourceTriangles;
+        result.refinementPasses = refined.passes;
+        result.largestLightmapErrorBefore = refined.largestErrorBefore;
+        result.largestLightmapErrorAfter = refined.largestErrorAfter;
+    }
+    for ( auto& entry : sceneTriangles )
+    {
+        TVector center{};
+        for ( const auto& corner : entry.triangle.source.corners )
+        {
+            const auto point = scaled(corner.position, options.scale);
+            center.x += point.x / 3;
+            center.y += point.y / 3;
+            center.z += point.z / 3;
+        }
+        const Cell cell{static_cast<int>(std::floor(center.x / 1.6)), static_cast<int>(std::floor(center.y / 1.6)),
+                        static_cast<int>(std::floor(center.z / 1.6)),
+                        result.materials[entry.triangle.material].footstep, entry.visualOnly};
+        cells[cell].push_back(std::move(entry.triangle));
+    }
+    sceneTriangles.clear();
+    sceneTriangles.shrink_to_fit();
     std::optional<JoJaHybridGeometry> hybrid;
     if ( useHybrid )
     {
@@ -1547,6 +1613,15 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     {
         report << "\nWorld model render pass: ordinaryThing (LEVELGEO cleared; Gouraud distance cutoff disabled on generated static model Things)";
     }
+    if ( options.lightmapRefinement )
+    {
+        report << "\nLightmap refinement: tolerance " << format::authoredDouble(options.lightmapRefinement->tolerance)
+               << "; minimum edge " << format::authoredDouble(options.lightmapRefinement->minimumEdge)
+               << " source units; triangles " << result.trianglesBeforeRefinement << " -> " << result.triangles
+               << "; source triangles split " << result.refinedSourceTriangles << " in " << result.refinementPasses
+               << " passes; largest interior light error " << result.largestLightmapErrorBefore << " -> "
+               << result.largestLightmapErrorAfter;
+    }
     if ( options.meshOptimization != MeshOptimization::Off )
     {
         report << "\nMesh optimization: " << meshOptimizationName(options.meshOptimization) << "; vertices "
@@ -1670,6 +1745,11 @@ JoJaImportResult prepareJoJaImport(const std::span<const std::byte> source, cons
     if ( options.meshOptimization != MeshOptimization::Off )
     {
         manifest << "\nmeshOptimization " << meshOptimizationName(options.meshOptimization);
+    }
+    if ( options.lightmapRefinement )
+    {
+        manifest << "\nlightmapRefinement v1 " << format::authoredDouble(options.lightmapRefinement->tolerance) << ' '
+                 << format::authoredDouble(options.lightmapRefinement->minimumEdge);
     }
     if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
     {

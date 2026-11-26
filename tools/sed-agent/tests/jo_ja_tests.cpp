@@ -678,10 +678,64 @@ void nonCollidingShadersTest(const fs::path& dir)
     }
 }
 
+void lightmapRefinementTest(const fs::path& dir)
+{
+    const auto bytes = sed::tests::makeRavenLightPoolFixture().bytes();
+    const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const auto source = dir / "pool.bsp";
+    const auto request = dir / "pool.json";
+    write(source, input);
+    auto recipe = Json::makeObject();
+    recipe.set("source", file(source, input));
+    recipe.set("allowPlaceholders", Json::makeBool(true));
+    const auto plan = [&]
+    {
+        write(request, toJsonString(recipe));
+        return runCommand("jo-ja-plan", {request.string()});
+    };
+    const auto prior = plan();
+    check(!prior.object.contains("lightmapRefinement") && prior.object.at("triangles").number == 2,
+          "Recipes without lightmapRefinement keep the source triangles and report no refinement");
+    recipe.set("lightmapRefinement", parseJson(R"({"tolerance":0.05})"));
+    const auto refined = plan();
+    const auto& row = refined.object.at("lightmapRefinement").object;
+    check(std::abs(row.at("tolerance").number - 0.05) < 1e-15 && row.at("minimumEdge").number == 16 &&
+              row.at("trianglesBefore").number == 2 && refined.object.at("triangles").number > 2 &&
+              row.at("trianglesAfter").number == refined.object.at("triangles").number &&
+              row.at("refinedSourceTriangles").number == 2 && row.at("passes").number > 0 &&
+              row.at("largestErrorAfter").number < row.at("largestErrorBefore").number &&
+              refined.object.at("manifestSha256").str != prior.object.at("manifestSha256").str,
+          "The plan reports the refinement, its default minimum edge and its counts, bound to the recipe");
+    recipe.set("lightmapRefinement", parseJson(R"({"tolerance":0.05,"minimumEdge":64})"));
+    const auto coarse = plan();
+    check(coarse.object.at("triangles").number < refined.object.at("triangles").number &&
+              coarse.object.at("manifestSha256").str != refined.object.at("manifestSha256").str,
+          "A larger minimum edge splits less and is bound to the recipe");
+    const auto schema = runCommand("schema", {"jo-ja-plan"});
+    const auto& property = schema.object.at("properties").object.at("lightmapRefinement").object;
+    check(property.at("type").str == "object" && property.at("required").array.at(0).str == "tolerance" &&
+              property.at("properties").object.at("minimumEdge").object.at("default").number == 16,
+          "The request schema documents lightmapRefinement with its required tolerance");
+    for ( const auto invalidValue : {R"(0.05)", R"({})", R"({"tolerance":0})", R"({"tolerance":1})",
+                                     R"({"tolerance":"0.05"})", R"({"tolerance":0.05,"minimumEdge":0.5})",
+                                     R"({"tolerance":0.05,"minimumEdge":4097})", R"({"tolerance":0.05,"extra":1})"} )
+    {
+        recipe.set("lightmapRefinement", parseJson(invalidValue));
+        rejects([&] { plan(); }, kExitUsage);
+    }
+    recipe.set("lightmapRefinement", parseJson(R"({"tolerance":0.05})"));
+    recipe.set("maxTriangles", Json::makeNumber(3));
+    rejects([&] { plan(); }, kExitRefusal);
+    recipe.set("maxTriangles", Json::makeNumber(100000));
+    recipe.set("geometryMode", Json::makeString("hybrid-sectors"));
+    rejects([&] { plan(); }, kExitRefusal);
+}
+
 void test(const fs::path& dir)
 {
     targetCollisionBasisTest(dir);
     nonCollidingShadersTest(dir);
+    lightmapRefinementTest(dir);
     invisibleClipTest(dir);
     const auto bytes = sed::tests::makeRavenBspFixture();
     const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());

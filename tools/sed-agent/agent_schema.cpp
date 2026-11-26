@@ -7,6 +7,7 @@
 #include "sed/level/overview.hpp"
 #include "sed/level/package.hpp"
 #include "sed/render/software_snapshot.hpp"
+#include "sed/assets/jo_ja_lightmap_refine.hpp"
 #include "sed/assets/mat_write.hpp"
 #include "sed/assets/obj_import.hpp"
 #include "sed/assets/runtime_archive.hpp"
@@ -1257,6 +1258,19 @@ Json joJaInspectSchema()
     result.set("title", Json::makeString("RED Raven source lightmap, visibility, brush and captured JK/MotS geometry inspection"));
     return result;
 }
+Json joJaLightmapRefinementSchema()
+{
+    auto tolerance = numeric(0, 1);
+    tolerance.set("exclusiveMinimum", Json::makeNumber(0));
+    tolerance.set("exclusiveMaximum", Json::makeNumber(1));
+    auto minimumEdge = numeric(1, sed::assets::kJoJaLightmapRefinementMaximumMinimumEdge);
+    minimumEdge.set("default", Json::makeNumber(sed::assets::kJoJaLightmapRefinementDefaultMinimumEdge));
+    auto result = object({
+        { "tolerance", described(std::move(tolerance), "Largest admitted difference, on the 0-1 corner light scale, between the first-atlas luminance and the interpolated corner luminance at any of the 28 grid probes of a triangle.") },
+        { "minimumEdge", described(std::move(minimumEdge), "Source units. A triangle whose longest edge is shorter than this does not start a split.") }
+    }, { "tolerance" });
+    return described(std::move(result), "Model scene only. Splits lightmapped triangles across their longest edge until interior light is within the tolerance. Triangles sharing a split edge split it too, so no T-junction is created. Splits count against maxTriangles; an over-budget refinement is refused. Absent reproduces existing recipes.");
+}
 Json joJaRequestSchema()
 {
     const auto file = boundFile(true);
@@ -1281,7 +1295,8 @@ Json joJaRequestSchema()
         { "sourceProfile", enumeration({"jo-mp", "ja-mp", "legacy"}) }, { "skipShaders", std::move(skips) },
         { "nonCollidingShaders", described(std::move(nonColliding),
             "Exact source shader names of 1 to 63 UTF-8 bytes each, kept visible in separate collide=0 Things. Nonempty selections require model-scene geometry and renderMeshCollision=true; source names and actual emitted geometry are checked during import. This does not establish gameplay intent or runtime collision.") },
-        { "sourceVisibility", joJaVisibilitySchema() }, { "meshOptimization", enumeration({"off", "strict", "loose"}) }
+        { "sourceVisibility", joJaVisibilitySchema() }, { "meshOptimization", enumeration({"off", "strict", "loose"}) },
+        { "lightmapRefinement", joJaLightmapRefinementSchema() }
     }, { "source" });
     auto& props = result.object.at("properties").object;
     props.at("geometryMode").set("default", Json::makeString("model-scene"));
@@ -1315,6 +1330,8 @@ Json joJaRequestSchema()
         propertyRule({ { "sourcePlayerClip", constant("omit") } })));
     allOf(result, condition(hasProperty("geometryMode", constant("hybrid-sectors")),
         propertyRule({ { "sourcePlayerClip", constant("omit") } })));
+    allOf(result, condition(hasProperty("geometryMode", constant("hybrid-sectors")),
+        absent({ "lightmapRefinement" })));
     allOf(result, condition(hasProperty("nonCollidingShaders", array(text(1, 63), 1, 256)),
         object({ { "renderMeshCollision", parseJson(R"({"const":true})") }, { "geometryMode", constant("model-scene") } },
             { "renderMeshCollision" }, false)));

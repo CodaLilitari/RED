@@ -10,6 +10,9 @@
   The [transparency example](docs/transparency_review.md) exercises a shaft crossing opaque detail in motion.
 - [Check walkway clearance](docs/walkway_clearance.md) for a selected floor, player radius and destinations,
   with an overlay to guide the in-game playtest.
+- JO/JA model-scene recipes can set `lightmapRefinement` to
+  [split triangles where the lightmap varies](docs/jo_ja_import.md#splitting-triangles-where-the-lightmap-varies),
+  so a floor whose corners sit on dark luxels keeps its bright interior. Shared edges stay conforming.
 
 ## 0.9.0
 

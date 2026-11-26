@@ -212,7 +212,8 @@ JoJaImportOptions optionsFrom(const Json& request)
     fields(request, {"schemaVersion", "source", "target", "levelName", "scale", "patchSubdivisions",
                      "trianglesPerModel", "maxTriangles", "maxModels", "allowPlaceholders", "renderMeshCollision",
                      "audioPolicy", "sourceProfile", "stockPickups", "materials", "palette", "skipShaders", "geometryMode", "maxSectors", "maxFragments", "reimport",
-                     "meshOptimization", "sourceVisibility", "worldModelRenderPass", "sourcePlayerClip", "movementBarrierBrushes", "nonCollidingShaders"});
+                     "meshOptimization", "sourceVisibility", "worldModelRenderPass", "sourcePlayerClip", "movementBarrierBrushes", "nonCollidingShaders",
+                     "lightmapRefinement"});
     (void)whole(request, "schemaVersion", 1, 1);
     JoJaImportOptions out;
     if ( const auto* visibility = request.find("sourceVisibility") )
@@ -319,6 +320,32 @@ JoJaImportOptions optionsFrom(const Json& request)
         }
     }
     const bool hybrid = out.geometryMode == JoJaGeometryMode::HybridSectors;
+    if ( const Json* refinement = request.find("lightmapRefinement") )
+    {
+        if ( !refinement->isObject() )
+        {
+            invalid("lightmapRefinement must be an object with a tolerance and an optional minimumEdge");
+        }
+        fields(*refinement, {"tolerance", "minimumEdge"});
+        JoJaLightmapRefinement settings;
+        const Json* tolerance = refinement->find("tolerance");
+        if ( !tolerance || tolerance->type != Json::Type::Number || !std::isfinite(tolerance->number) ||
+             !(tolerance->number > 0 && tolerance->number < 1) )
+        {
+            invalid("lightmapRefinement.tolerance must be greater than 0 and less than 1");
+        }
+        settings.tolerance = tolerance->number;
+        if ( const Json* edge = refinement->find("minimumEdge") )
+        {
+            if ( edge->type != Json::Type::Number || !std::isfinite(edge->number) || edge->number < 1 ||
+                 edge->number > kJoJaLightmapRefinementMaximumMinimumEdge )
+            {
+                invalid("lightmapRefinement.minimumEdge must be 1 to 4096 source units");
+            }
+            settings.minimumEdge = edge->number;
+        }
+        out.lightmapRefinement = settings;
+    }
     out.patchSubdivisions = whole(request, "patchSubdivisions", out.patchSubdivisions, 16);
     out.trianglesPerModel = whole(request, "trianglesPerModel", out.trianglesPerModel, hybrid ? 479 : 170);
     out.maxTriangles = whole(request, "maxTriangles", static_cast<unsigned>(out.maxTriangles), hybrid ? 250000 : 100000);
@@ -462,6 +489,19 @@ Json importReport(const JoJaImportResult& result, const JoJaImportOptions& optio
     if ( options.worldModelRenderPass == JoJaWorldModelRenderPass::OrdinaryThing )
     {
         out.set("worldModelRenderPass", Json::makeString("ordinaryThing"));
+    }
+    if ( options.lightmapRefinement )
+    {
+        auto refinement = Json::makeObject();
+        refinement.set("tolerance", Json::makeNumber(options.lightmapRefinement->tolerance));
+        refinement.set("minimumEdge", Json::makeNumber(options.lightmapRefinement->minimumEdge));
+        refinement.set("trianglesBefore", Json::makeNumber(result.trianglesBeforeRefinement));
+        refinement.set("trianglesAfter", Json::makeNumber(result.triangles));
+        refinement.set("refinedSourceTriangles", Json::makeNumber(result.refinedSourceTriangles));
+        refinement.set("passes", Json::makeNumber(result.refinementPasses));
+        refinement.set("largestErrorBefore", Json::makeNumber(result.largestLightmapErrorBefore));
+        refinement.set("largestErrorAfter", Json::makeNumber(result.largestLightmapErrorAfter));
+        out.set("lightmapRefinement", std::move(refinement));
     }
     out.set("meshOptimization", Json::makeString(meshOptimizationName(options.meshOptimization)));
     if ( options.meshOptimization != MeshOptimization::Off )

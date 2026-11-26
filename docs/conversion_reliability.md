@@ -75,8 +75,10 @@ Its measured scalar light error was approximately 0.014 RMS on a 0–1 scale.
 That grid is an observed repair, not a universal tessellation setting. Measure interior error, preserve the native
 triangle-fan interpretation, and keep shared edges, normals and model/Thing limits valid. Check stored intensities
 and a fixed-camera game capture. Replacing the texture or raising global ambient would change unrelated lighting.
-The importer's `patchSubdivisions` controls quadratic patches; it does not subdivide ordinary planar floors to
-recover interior lightmap detail.
+The importer's `patchSubdivisions` controls quadratic patches only. For planar floors, a model-scene recipe can set
+[`lightmapRefinement`](jo_ja_import.md#splitting-triangles-where-the-lightmap-varies) to split triangles until the
+measured interior error is within a tolerance, keeping shared edges conforming. Check the stored intensities and a
+fixed-camera game capture afterwards, as for a map-specific repair.
 
 Use [first-lightmap inspection](jo_ja_import.md#inspecting-first-lightmap-fidelity) to measure sampled RGB
 interpolation error and the color lost when a corner becomes scalar. The report identifies the source triangle

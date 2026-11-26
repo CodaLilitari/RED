@@ -128,7 +128,12 @@ vertices and faces. `"loose"` allows 4/255 of light and half a texel for more me
 edges wherever no face of any generated model keeps them; `"off"` (the default) keeps existing recipes. The plan
 reports `optimizedVertices`, `optimizedFaces` and `worstNormalTurnDegrees`, and loose adds `straightCornersRemoved`
 and `fanTriangles`. The import dialog offers the same three levels. See
-[Mesh optimization](jo_ja_import.md#mesh-optimization). See the [playable conversion checks](jo_ja_import.md#qualifying-a-playable-conversion) for exact mixed-edition joins, controlled movement/shot fixtures and synthetic COG tests.
+[Mesh optimization](jo_ja_import.md#mesh-optimization).
+
+Add `"lightmapRefinement": {"tolerance": 0.05}` to a model-scene recipe to split triangles whose first-lightmap
+interior differs from their corner light by more than the tolerance. `minimumEdge` (default 16 source units) stops
+the splitting. The plan reports the triangle counts and the largest error before and after. See
+[Splitting triangles where the lightmap varies](jo_ja_import.md#splitting-triangles-where-the-lightmap-varies). See the [playable conversion checks](jo_ja_import.md#qualifying-a-playable-conversion) for exact mixed-edition joins, controlled movement/shot fixtures and synthetic COG tests.
 
 Moving models, triggers, brush physics, shader scripts, ambient audio and mission logic require further authoring.
 Native solid sector boundaries collide. `renderMeshCollision: true` also makes residual rendered model detail

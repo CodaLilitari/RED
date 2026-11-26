@@ -227,6 +227,18 @@ void conversionShaderContracts()
         false, "schema and runtime both refuse embedded NUL in a selected shader");
     fixture(schema, prefix + R"("renderMeshCollision":true,"nonCollidingShaders":[")" + std::string(64, 'x') + R"("]})",
         false, "collision shader names retain the compiled source-name limit");
+    fixture(schema, prefix + R"("lightmapRefinement":{"tolerance":0.05}})",
+        true, "lightmap refinement needs only a tolerance");
+    fixture(schema, prefix + R"("target":"mots","lightmapRefinement":{"tolerance":0.05,"minimumEdge":4096}})",
+        true, "lightmap refinement admits MotS model scenes and the largest minimum edge");
+    for ( const char* refinement : { R"({})", R"({"tolerance":0})", R"({"tolerance":1})", R"({"tolerance":0.05,"minimumEdge":0.5})",
+              R"({"tolerance":0.05,"minimumEdge":4097})", R"({"tolerance":0.05,"extra":true})" } )
+    {
+        fixture(schema, prefix + R"("lightmapRefinement":)" + refinement + "}", false,
+            "lightmap refinement requires a tolerance in (0, 1) and a minimum edge of 1 to 4096 source units");
+    }
+    fixture(schema, prefix + R"("geometryMode":"hybrid-sectors","lightmapRefinement":{"tolerance":0.05}})",
+        false, "lightmap refinement is limited to model scenes");
 }
 
 void focusedContracts()
