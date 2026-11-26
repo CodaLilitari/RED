@@ -17,6 +17,7 @@ def fixture(version):
     data[9] = struct.pack("<ii", 7, 3)
     data[10] = struct.pack("<10f4B", *range(10), 11, 12, 13, 14)
     data[13] = struct.pack("<12i12f2i", *range(26))
+    data[14] = bytes([200, 100, 50, 10, 20, 30]) + bytes(128 * 128 * 3 - 6)
     data[15] = bytes(range(8))
     if version == 47:
         data[17] = bytes(128)
@@ -54,6 +55,18 @@ class QuakeBspAdapterTests(unittest.TestCase):
                 self.assertEqual(struct.unpack_from("<4i", surface, 36), (7, -3, -3, -3))
                 self.assertEqual(surface[84:], lump(source, 13)[40:])
                 self.assertEqual(report["lightGridSamplesOmitted"], 1)
+
+    def test_lightmap_shift_preserves_hue_and_vertex_alpha(self):
+        source = fixture(47)
+        for shift, low in ((0, (10, 20, 30)), (1, (20, 40, 60)), (2, (40, 80, 120))):
+            with self.subTest(shift=shift):
+                result, report = normalize(source, lightmap_shift=shift)
+                self.assertEqual(report["lightmapShift"], shift)
+                peak = (200, 100, 50) if shift == 0 else (255, 127, 63)
+                self.assertEqual(lump(result, 14)[:6], bytes(peak + low))
+                self.assertEqual(lump(result, 10)[64:68], bytes([11 << shift, 12 << shift, 13 << shift, 14]))
+        with self.assertRaisesRegex(ValueError, "shift"):
+            normalize(source, lightmap_shift=3)
 
     def test_refuse_partial_records_and_overlaps(self):
         source = bytearray(fixture(47))

@@ -53,7 +53,17 @@ def remap(bits, mapping):
     return sum(out_bit for in_bit, out_bit in mapping.items() if bits & in_bit)
 
 
-def normalize(data):
+def shifted_rgb(red, green, blue, shift):
+    red, green, blue = red << shift, green << shift, blue << shift
+    peak = max(red, green, blue)
+    if peak <= 255:
+        return bytes((red, green, blue))
+    return bytes((red * 255 // peak, green * 255 // peak, blue * 255 // peak))
+
+
+def normalize(data, lightmap_shift=0):
+    if lightmap_shift not in (0, 1, 2):
+        raise ValueError("lightmap shift must be 0, 1, or 2")
     version, source = source_lumps(data)
     target = list(source[:17]) + [b""]
     # RED samples lightmaps and vertex colors; Raven's optional compressed
@@ -61,6 +71,7 @@ def normalize(data):
     target[15] = b""
     report = {
         "sourceVersion": version,
+        "lightmapShift": lightmap_shift,
         "sourceSha256": hashlib.sha256(data).hexdigest(),
         "lightGridSamplesOmitted": len(source[15]) // 8,
         "advertisementBytesOmitted": len(source[17]) if version == 47 else 0,
@@ -90,6 +101,9 @@ def normalize(data):
     target[9] = sides
     verts = bytearray()
     for first, normal_color in struct.iter_unpack("<28s16s", source[10]):
+        if lightmap_shift:
+            color = shifted_rgb(*normal_color[12:15], lightmap_shift)
+            normal_color = normal_color[:12] + color + normal_color[15:]
         verts.extend(first + bytes(24) + normal_color + bytes(12))
     target[10] = verts
     surfaces = bytearray()
@@ -98,6 +112,11 @@ def normalize(data):
         surfaces.extend(struct.pack("<12i", lm, -3, -3, -3, x, 0, 0, 0, y, 0, 0, 0))
         surfaces.extend(remaining)
     target[13] = surfaces
+    if lightmap_shift:
+        pixels = bytearray()
+        for rgb in struct.iter_unpack("3B", source[14]):
+            pixels.extend(shifted_rgb(*rgb, lightmap_shift))
+        target[14] = pixels
     result = bytearray(8 + len(target) * 8)
     struct.pack_into("<4si", result, 0, b"RBSP", 1)
     for i, lump in enumerate(target):
@@ -112,10 +131,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="extracted Quake BSP")
     parser.add_argument("output", type=Path, help="new RBSP file")
+    parser.add_argument("--lightmap-shift", type=int, choices=(0, 1, 2), default=0,
+                        help="whole stops of overbright correction for lightmaps and vertex RGB")
     args = parser.parse_args()
     if args.source.stat().st_size > LIMIT:
         raise ValueError("IBSP exceeds RED's input limit")
-    normalized, report = normalize(args.source.read_bytes())
+    normalized, report = normalize(args.source.read_bytes(), args.lightmap_shift)
     stream = args.output.open("xb")
     try:
         with stream:

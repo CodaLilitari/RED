@@ -30,6 +30,11 @@ bits without a direct Raven equivalent, omitted positional light-grid samples an
 the original PK3 for artwork, its shader scripts and any gameplay fields needing manual conversion. Quake player
 starts, items, triggers and jump-pad behavior require target-specific authoring and tests in each requested game.
 
+For a scene that renders too dark in the target game, compare the default atlas with a
+`--lightmap-shift 1` import from the same camera. This optional setting accepts zero, one or two stops.
+It scales both the packed RGB lightmap and vertex RGB. Colors over the display range retain their hue,
+and vertex alpha remains intact. A shift of zero preserves the original color bytes. The receipt records the setting.
+
 The source layouts are documented in
 [id Software's BSP structures](https://github.com/id-Software/Quake-III-Arena/blob/master/code/qcommon/qfiles.h),
 [NetRadiant's Quake Live IBSP implementation](https://github.com/Garux/netradiant-custom/blob/master/tools/quake3/q3map2/bspfile_ibsp.cpp)
