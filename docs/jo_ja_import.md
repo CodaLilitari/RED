@@ -11,6 +11,30 @@ The input is an extracted `RBSP` version 1 `.bsp`, used by JO and JA. Extract th
 authorized to use from the source PK3 before opening the importer. RED packages the MATs you select and references
 the target game's stock resources. Keep source art, music and original game archives out of shared test fixtures.
 
+## Preparing a Quake III or Quake Live map
+
+Extract the exact BSP from its PK3 and keep that package with its source credits. The bundled Python 3 helper
+accepts Quake III `IBSP` version 46 and Quake Live `IBSP` version 47. It writes a new intermediate file for
+the same editor or command-line importer. Save its JSON receipt next to the source. For example:
+
+```console
+python tools/engine-capture/quake_bsp_adapter.py arena.bsp arena.red.bsp > arena-adapter.json
+red-agent jo-ja-inspect arena.red.bsp
+```
+
+The receipt pairs the original BSP hash with the hash RED will report. The adapter carries over world and inline
+model ranges, curves, texture and lightmap coordinates, RGB lightmaps, vertex colors, visibility, entity text and
+brush planes. Quake brush sides store no draw-surface link. Sky, invisible surfaces, player clips and other shared
+flags are translated by meaning because their bit positions differ between the games. The receipt lists shader
+bits without a direct Raven equivalent, omitted positional light-grid samples and any advertising data. Preserve
+the original PK3 for artwork, its shader scripts and any gameplay fields needing manual conversion. Quake player
+starts, items, triggers and jump-pad behavior require target-specific authoring and tests in each requested game.
+
+The source layouts are documented in
+[id Software's BSP structures](https://github.com/id-Software/Quake-III-Arena/blob/master/code/qcommon/qfiles.h),
+[NetRadiant's Quake Live IBSP implementation](https://github.com/Garux/netradiant-custom/blob/master/tools/quake3/q3map2/bspfile_ibsp.cpp)
+and [Raven's surface and contents flags](https://github.com/JACoders/OpenJK/blob/master/codemp/game/surfaceflags.h).
+
 ## Editor workflow
 
 1. Open **Tools > Import JO/JA Map…**, choose the source BSP and select **Jedi Knight (GOB)** or

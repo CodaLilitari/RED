@@ -254,7 +254,7 @@ foreach(_kind IN ITEMS AGENT MCP)
   endif()
 endforeach()
 if(DEFINED SED_PACKAGE_CAPTURE_RUNNER OR DEFINED SED_PACKAGE_CAPTURE_README OR DEFINED SED_PACKAGE_CAPTURE_GAMEPLAY)
-  foreach(_kind IN ITEMS RUNNER README GAMEPLAY PROFILE PROFILE_HTML COLLECT_PROFILE PEER COG_TRACE COLLISION_OVERLAY PANE_TRIAL PK3_MAPS RELEASE_DIFF VERIFY_PAIR TRIAGE VISUAL_COMPARE WALKWAY WALKWAY_GEOMETRY)
+  foreach(_kind IN ITEMS RUNNER README GAMEPLAY PROFILE PROFILE_HTML COLLECT_PROFILE PEER COG_TRACE COLLISION_OVERLAY PANE_TRIAL QUAKE_BSP PK3_MAPS RELEASE_DIFF VERIFY_PAIR TRIAGE VISUAL_COMPARE WALKWAY WALKWAY_GEOMETRY)
     set(_setting "SED_PACKAGE_CAPTURE_${_kind}")
     require_value(${_setting})
     require_nonempty_file("${${_setting}}" "Capture ${_kind}")
@@ -266,7 +266,7 @@ if(DEFINED SED_PACKAGE_CAPTURE_RUNNER OR DEFINED SED_PACKAGE_CAPTURE_README OR D
     "tools/engine-capture/gameplay_capture.py"
     "tools/engine-capture/route_performance.py" "tools/engine-capture/route_performance_html.py" "tools/engine-capture/collect_route_profile.py" "tools/engine-capture/peer_qualification.py"
     "tools/engine-capture/compare_cog_trace.py" "tools/engine-capture/collision_overlay.py"
-    "tools/engine-capture/pane_trial.py" "tools/engine-capture/compare_pk3_maps.py" "tools/engine-capture/compare_episode_releases.py" "tools/engine-capture/verify_episode_pair.py" "tools/engine-capture/triage_legacy_archives.py"
+    "tools/engine-capture/pane_trial.py" "tools/engine-capture/quake_bsp_adapter.py" "tools/engine-capture/compare_pk3_maps.py" "tools/engine-capture/compare_episode_releases.py" "tools/engine-capture/verify_episode_pair.py" "tools/engine-capture/triage_legacy_archives.py"
     "tools/engine-capture/compare_visual_captures.py" "tools/engine-capture/walkway_clearance.py" "tools/engine-capture/walkway_geometry.py")
 endif()
 
