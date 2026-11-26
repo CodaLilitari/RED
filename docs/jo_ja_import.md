@@ -115,11 +115,14 @@ alone does not preserve those behaviors. Exact shader names remain in the report
 ### Choosing between PK3 map variants
 
 When packages install different versions of the same map, compare their BSPs before choosing one.
-From the release directory or source tree, run
+For example, from the root of an extracted Linux release, run
 
 ```sh
-python3 -B tools/engine-capture/compare_pk3_maps.py older.pk3 redux.pk3 --agent ./red-agent
+python3 -B usr/bin/tools/engine-capture/compare_pk3_maps.py older.pk3 redux.pk3 --agent ./usr/bin/red-agent
 ```
+
+The [capture tools guide](../tools/engine-capture/README.md) lists the Windows and macOS package paths.
+From a source checkout, use `tools/engine-capture/compare_pk3_maps.py` and pass the path to your built agent.
 
 `paths` lists distinct BSP hashes at each case-insensitive installed path. Under `variants`, each
 hash has its package/member names, world surface count, source player starts, triggers and complete

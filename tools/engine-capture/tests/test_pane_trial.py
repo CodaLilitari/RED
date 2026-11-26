@@ -1,4 +1,5 @@
 import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,7 +52,12 @@ class PaneTrialTests(unittest.TestCase):
             spec = gameplay_capture.validate_scenario(pane_trial.recipe(p, fire))
             recipe_hash = store(directory / "scenario-input.json", spec)
             journal_hash = store(agent / "commands.jsonl", {})
-            inputs = {"engineSha256":"e"*64, "packageSha256":package, "scenarioInputSha256":recipe_hash}
+            (directory / "episode").mkdir()
+            gob = directory / "episode/arena.gob"
+            content = pane_trial.observer(p).encode("ascii")
+            gob.write_bytes(struct.pack("<4sIII",b"GOB ",20,12,1)
+                            + struct.pack("<II128s",152,len(content),b"cog\\redpane.cog") + content + package.encode("ascii"))
+            inputs = {"engineSha256":"e"*64, "packageSha256":pane_trial.identity(gob), "scenarioInputSha256":recipe_hash}
             state = {"levelActive":True, "player":{"inventory":{"100":2 if fire else 1,"11":49 if fire else 50}}}
             steps = []
             for i, step in enumerate(spec["steps"]):
@@ -64,7 +70,8 @@ class PaneTrialTests(unittest.TestCase):
             report_hash = store(directory / "scenario.json", {"inputs":inputs, "scenarioSha256":recipe_hash,
                 "status":"passed", "physicsOverrides":False, "steps":steps, "finalState":state})
             store(directory / "launcher-receipt.json", {"status":"completed", "immutableInputsUnchanged":True,
-                "gameplayInputs":inputs,
+                "gameplayInputs":inputs, "episodeArchive":{"path":"episode/arena.gob", "mapEntry":"jkl\\arena.jkl",
+                                                             "archiveSha256":inputs["packageSha256"]},
                 "gameplay":{"status":"passed", "scenarioSha256":report_hash, "journal":{"sha256":journal_hash}}})
 
         with tempfile.TemporaryDirectory() as folder:
@@ -74,6 +81,8 @@ class PaneTrialTests(unittest.TestCase):
             session(shot,True,"a"*64)
             session(wrong,True,"b"*64)
             self.assertEqual(pane_trial.compare(p,hold,shot)["fire"]["remainingAmmo"],49)
+            with self.assertRaisesRegex(ValueError,"packaged observer"):
+                pane_trial.compare(dict(p,target=12),hold,shot)
             with self.assertRaisesRegex(ValueError,"same engine and packaged episode"):
                 pane_trial.compare(p,hold,wrong)
             with self.assertRaisesRegex(ValueError,"recipe, report or journal"):

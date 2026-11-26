@@ -88,14 +88,13 @@ endif()
 # must include the requested command-line companions without scanning a tree.
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/red-agent.exe" "synthetic agent")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/red-mcp.exe" "synthetic MCP")
-file(WRITE "${SED_STAGE_TEST_ROOT}/bin/gameplay_capture.py" "# synthetic ordinary-gameplay controller")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/route_performance_html.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/collect_route_profile.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/peer_qualification.py" "# synthetic profile companion")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/compare_cog_trace.py" "# synthetic COG trace comparison")
 file(WRITE "${SED_STAGE_TEST_ROOT}/bin/collision_overlay.py" "# synthetic collision overlay")
 set(_capture_source "${CMAKE_CURRENT_LIST_DIR}/../../tools/engine-capture")
-foreach(_helper IN ITEMS invoke_engine_capture.py route_performance.py pane_trial.py compare_pk3_maps.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
+foreach(_helper IN ITEMS invoke_engine_capture.py gameplay_capture.py route_performance.py pane_trial.py compare_pk3_maps.py compare_episode_releases.py verify_episode_pair.py triage_legacy_archives.py
     compare_visual_captures.py walkway_clearance.py walkway_geometry.py)
   configure_file("${_capture_source}/${_helper}" "${SED_STAGE_TEST_ROOT}/bin/${_helper}" COPYONLY)
 endforeach()
@@ -148,6 +147,28 @@ foreach(_helper IN ITEMS compare_cog_trace.py collision_overlay.py pane_trial.py
 endforeach()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  set(_installed_tools "${SED_STAGE_TEST_ROOT}/stage-companions/tools/engine-capture")
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -E -s -B "${_installed_tools}/compare_pk3_maps.py" --help
+    WORKING_DIRECTORY "${SED_STAGE_TEST_ROOT}"
+    RESULT_VARIABLE _maps_exit OUTPUT_VARIABLE _maps_help ERROR_VARIABLE _maps_error)
+  if(NOT _maps_exit EQUAL 0 OR NOT _maps_help MATCHES "--select")
+    message(FATAL_ERROR "Cannot run the packaged PK3 comparison helper: ${_maps_error}")
+  endif()
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -E -s -B "${_installed_tools}/pane_trial.py" prepare pane-case
+      --game jk --edition indexed8 --episode arena --map arena.jkl --target 9 --control 10
+      --signal-bin 100 --ammo-bin 11 --starting-ammo 50
+    WORKING_DIRECTORY "${SED_STAGE_TEST_ROOT}"
+    RESULT_VARIABLE _pane_exit ERROR_VARIABLE _pane_error)
+  if(NOT _pane_exit EQUAL 0)
+    message(FATAL_ERROR "Cannot prepare a trial with the packaged pane helper: ${_pane_error}")
+  endif()
+  foreach(_file IN ITEMS pane-profile.json redpane.cog no-fire.json fire.json)
+    if(NOT EXISTS "${SED_STAGE_TEST_ROOT}/pane-case/${_file}")
+      message(FATAL_ERROR "Packaged pane helper omitted ${_file}")
+    endif()
+  endforeach()
   execute_process(
     COMMAND "${Python3_EXECUTABLE}" -E -s -B
       "${SED_STAGE_TEST_ROOT}/stage-companions/tools/engine-capture/triage_legacy_archives.py" --help

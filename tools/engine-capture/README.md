@@ -1,8 +1,18 @@
 # Engine capture runner (D-14)
 
-For source packages that install competing versions of a Raven map, use
-[`compare_pk3_maps.py`](../../docs/jo_ja_import.md#choosing-between-pk3-map-variants) to group the BSPs
-by content and hand one exact version to RED.
+Use [compare_pk3_maps.py](compare_pk3_maps.py) to compare competing PK3 map versions. From the root
+of an extracted RED release, use the paths for your platform.
+
+| Platform | Helper directory | Agent executable |
+| --- | --- | --- |
+| Windows | `tools/engine-capture` | `./red-agent.exe` |
+| Linux | `usr/bin/tools/engine-capture` | `./usr/bin/red-agent` |
+| macOS | `RED.app/Contents/Resources/tools/engine-capture` | `./red-agent` |
+
+For example, on Linux run
+`python3 -B usr/bin/tools/engine-capture/compare_pk3_maps.py older.pk3 redux.pk3 --agent ./usr/bin/red-agent`.
+The report groups BSPs by their installed paths and SHA-256. Add `--select <full-sha256> --output chosen.bsp`
+to extract that exact version for RED's **Import JO/JA Map** dialog.
 
 Pattern port of Coda's `sed-engine-capture-v1` capture runner,
 including the Linux engine profile (delta row D-14 in

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 import gameplay_capture
+from verify_episode_pair import archive_index
 
 
 OBSERVER = """# RED trial observer. The selected Things have no event links to this COG.
@@ -90,18 +91,22 @@ def recipe(p, fire):
             "launch":launch, "steps":steps}
 
 
+def observer(p):
+    script = OBSERVER
+    for marker,key in (("@TARGET@","target"),("@CONTROL@","control"),("@SIGNAL@","signalBin")):
+        script = script.replace(marker, str(p[key]))
+    return script
+
+
 def prepare(destination, p):
     files = {"pane-profile.json":p}
     for fire, filename in ((False,"no-fire.json"),(True,"fire.json")):
         files[filename] = recipe(p, fire)
         gameplay_capture.validate_scenario(files[filename])
-    script = OBSERVER
-    for marker,key in (("@TARGET@","target"),("@CONTROL@","control"),("@SIGNAL@","signalBin")):
-        script = script.replace(marker, str(p[key]))
     destination.mkdir(exist_ok=False)
     for filename, value in files.items():
         (destination / filename).write_text(json.dumps(value, indent=2) + "\n",encoding="utf-8")
-    (destination / "redpane.cog").write_text(script, encoding="ascii")
+    (destination / "redpane.cog").write_text(observer(p), encoding="ascii")
 
 
 def read_json(path):
@@ -147,6 +152,21 @@ def verify_run(directory, p, fire):
         raise ValueError(f"{directory}: final native inventory does not match the selected trial")
     if any(not re.fullmatch("[0-9a-f]{64}", inputs[key] or "") for key in ("engineSha256", "packageSha256")):
         raise ValueError(f"{directory}: missing package or engine identity")
+    archive = receipt["episodeArchive"]
+    expected_paths = {f"episode/{p['episode']}.{ext}" for ext in ("gob","goo")}
+    if archive["path"] not in expected_paths or archive["mapEntry"] != "jkl\\" + p["map"].lower():
+        raise ValueError(f"{directory}: the captured episode and map differ from the selected profile")
+    package = directory / archive["path"]
+    if identity(package) != inputs["packageSha256"] or inputs["packageSha256"] != archive["archiveSha256"]:
+        raise ValueError(f"{directory}: staged episode differs from the capture receipt")
+    with package.open("rb") as stream:
+        entry = archive_index(stream).get("cog/redpane.cog")
+        if entry is None or entry[1] > 32 * 1024:
+            raise ValueError(f"{directory}: missing expected pane observer")
+        stream.seek(entry[0])
+        actual = stream.read(entry[1]).decode("ascii").replace("\r\n", "\n")
+        if actual != observer(p):
+            raise ValueError(f"{directory}: packaged observer differs from the selected Thing and signal bindings")
     return {"engineSha256":inputs["engineSha256"], "packageSha256":inputs["packageSha256"],
             "scenarioSha256":summary["scenarioSha256"],
             "remainingAmmo":gameplay_capture.lookup(last, f"player.inventory.{p['ammoBin']}")}

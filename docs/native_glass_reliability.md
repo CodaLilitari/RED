@@ -161,7 +161,7 @@ The Bespin recipe lists the parent archive hashes and output JKL hashes.
 
 The two breakable window models contain 152 translucent faces. When the window-2 diagnostic hid just those
 faces, the detailed room behind them appeared. Clearing the panes' inherited LEVELGEO flag alone left a JK
-ordering failure. The JK candidate also moved 219 zero-frame `bp000`–`bp218` architecture Things to the early
+ordering failure. The JK candidate also moved 219 zero-frame `bp000`â€“`bp218` architecture Things to the early
 pass. Their 16,690 visible faces all have flags `0x0`. The MotS architecture already used that pass. The
 [Bespin recipe](../tools/engine-capture/recipes/bespin_glass/README.md) therefore changes 220 JKL bytes on JK
 and one on MotS, retaining the original model, collision, MAT and COG resources.
@@ -175,6 +175,18 @@ weapon, breakage COG and collision paths handled both no-fire and fire runs. Wit
 Two ordinary Bryar shots created native player-owned projectiles and took energy from 50 to 48. The first shot destroyed Thing 269 and its slot was freed.
 The second pane (Thing 270) retained its signature and face collision. The player stayed grounded on the
 same supporting Thing in both builds. This tests one breakable pane and its neighbouring control in JK16.
+
+To repeat this check on an author-selected pane, generate the two matched gameplay recipes and their
+passive observer. They record whether the target was freed, the neighbouring pane kept its original
+signature and face-collision mode, and firing consumed ammunition. See the
+[breakable pane trial](../tools/engine-capture/README.md#breakable-pane-and-neighbouring-control).
+
+The reusable observer was exercised in an original two-pane room on Windows OpenJKDF2, separately
+with indexed and RGB565 materials. In each held-input run both Things survived. In each firing run a
+native Use edge fired the range's player-owned projectile and only the target cleared. A separate
+event capture identified Thing 0 as the damage recipient, Thing 3 as the projectile and player 2
+as its owner. This range used the Windows play-input probe. Its Use trigger did not exercise the
+Linux gameplay recipe's Mouse1 control or ammunition assertion.
 
 ### Academy V3
 
@@ -250,7 +262,7 @@ that uses the same `00wglas2.mat`. This lets the native material do its work wit
 
 Compare three game frames from one pose: the previous treatment, the repair and a copy with the panes hidden.
 Using the hidden-pane frame as the backdrop reference, the mean RGB difference over the far steps in Sparring
-fell from 108 to 10 on the 0–255 scale. The right-hand wall in Training Grounds 7 went from 108 to 9. These
+fell from 108 to 10 on the 0â€“255 scale. The right-hand wall in Training Grounds 7 went from 108 to 9. These
 observations used original-game F12 captures under WineD3D with llvmpipe.
 
 Check indexed software rendering independently. At the same Sparring pose the large sky wedge receded, but a
