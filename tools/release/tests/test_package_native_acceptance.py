@@ -266,7 +266,7 @@ print(json.dumps(receipt))
              "tools/engine-capture/gameplay_capture.py",
              "tools/engine-capture/route_performance.py", "tools/engine-capture/route_performance_html.py", "tools/engine-capture/collect_route_profile.py", "tools/engine-capture/peer_qualification.py",
              "tools/engine-capture/compare_cog_trace.py", "tools/engine-capture/collision_overlay.py",
-             "tools/engine-capture/pane_trial.py", "tools/engine-capture/compare_pk3_maps.py", "tools/engine-capture/compare_episode_releases.py", "tools/engine-capture/verify_episode_pair.py", "tools/engine-capture/triage_legacy_archives.py",
+             "tools/engine-capture/pane_trial.py", "tools/engine-capture/quake_bsp_adapter.py", "tools/engine-capture/quake_cloud_sky.py", "tools/engine-capture/quake_trigger_routes.py", "tools/engine-capture/compare_pk3_maps.py", "tools/engine-capture/compare_episode_releases.py", "tools/engine-capture/verify_episode_pair.py", "tools/engine-capture/triage_legacy_archives.py",
              "tools/engine-capture/compare_visual_captures.py", "tools/engine-capture/walkway_clearance.py", "tools/engine-capture/walkway_geometry.py")}
         files.update({"data/" + name: b"synthetic parsed data" for name in helper.RUNTIME_NAMES})
         manifest = {"format": 1, "platform": "Windows", "version": "0.6.0", "qt_version": "6.8.3",

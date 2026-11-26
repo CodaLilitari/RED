@@ -14,6 +14,11 @@ For example, on Linux run
 The report groups BSPs by their installed paths and SHA-256. Add `--select <full-sha256> --output chosen.bsp`
 to extract that exact version for RED's **Import JO/JA Map** dialog.
 
+For a Quake III or Quake Live source BSP, run
+`python3 -B tools/engine-capture/quake_bsp_adapter.py arena.bsp arena.red.bsp` and save the JSON output.
+Open the resulting BSP in RED's JO/JA importer. The [import guide](../../docs/jo_ja_import.md#preparing-a-quake-iii-or-quake-live-map)
+describes supported flags, lighting and gameplay authoring.
+
 Pattern port of Coda's `sed-engine-capture-v1` capture runner,
 including the Linux engine profile (delta row D-14 in
 [DELTA_INVENTORY.md](../../docs/port/DELTA_INVENTORY.md)). The runner

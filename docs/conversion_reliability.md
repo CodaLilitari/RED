@@ -82,6 +82,42 @@ Use [first-lightmap inspection](jo_ja_import.md#inspecting-first-lightmap-fideli
 interpolation error and the color lost when a corner becomes scalar. The report identifies the source triangle
 and sample position so an author can inspect the affected surface.
 
+### Recover colored light pools on imported architecture
+
+Start with a fixed view of the source room and the same camera in the target game. Run
+`red-agent jo-ja-inspect scene.rbsp --lightmap-rank 32 3` with the import's patch subdivision count. Inspect the
+reported surface with `--lightmap <surface> 3`. Check a torch-lit wall, a shadow and a neutral surface in that view.
+In Fly on Rocket the source atlas at one brick corner was RGB (1.00, 0.51, 0.02). Its classic 3DO vertex held
+one intensity of 0.58. On a separate gallery wall the interior reached (1.00, 0.56, 0.34) while interpolated
+corner intensity was 0.15.
+
+Use RED's world ray bake for native sector corners. In a model-scene import, most visible architecture belongs
+to placed 3DOs. [Model Lighting](model_lighting.md) can change their stored vertex intensities. A surface with
+a colored light pool between vertices can instead carry the source RGB in a dedicated MAT. Sample diffuse and
+lightmap UVs independently. Sample the atlas at luxel centers, then multiply its RGB into the diffuse artwork.
+Give the resulting face a lighting mode that displays the baked texture once. Retain shadeable models for
+actors and moving objects.
+
+Calibrate the BSP exposure and final display gain separately against a source screenshot. Apply saturation
+control to the source light first. Evaluate display gain on the diffuse-light product. A source's engine settings
+and a target's palette can change both shadow detail and the torch color. In the target game, inspect both the
+indexed and RGB565 editions at the same camera, including the edges and more distant mips of every packed chart.
+
+A packed chart can occupy only a small part of a MAT. On this arena, three mip levels softened the stair and
+floor detail at the original renderer’s distance thresholds. A single mip retained it. The indexed edition used a
+level-specific master palette with additional stone and amber shades. Its first conversion with error diffusion
+introduced purple texels into brown stone. Using that same palette with `mat-create` and `"dither": false`
+removed the purple patches in the native 8-bit capture. Verify these choices in motion and from the same camera
+before adopting them for a different map.
+
+A MotS model can appear correct in accelerated rendering while hidden walls and floors draw on top of it in
+software. For Fly on Rocket, moving the 129 texture-baked architecture models into the ordinary Thing pass
+corrected that ordering in the captured gallery. The 1,828 still-Gouraud faces used 1,424 model vertices.
+Their stored scalar intensities matched every channel of the corresponding placed ARCH records within 0.00000003.
+Check this per placement before changing a MotS draw pass. Colored ARCH vertices that carry distinct information
+need to keep their binding or have that lighting explicitly baked. Keep physical geometry, Thing IDs and other
+template flags intact. Compare the same view in software and accelerated rendering.
+
 ### Match source effects to target rendering
 
 Establish whether brightness belongs to an emitter, additive overlay, ordinary cloth or baked illumination.

@@ -151,7 +151,7 @@ class PackageAcceptanceTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("synthetic package content")
         for name in ("gameplay_capture.py", "compare_cog_trace.py", "collision_overlay.py",
-                     "pane_trial.py", "compare_pk3_maps.py", "compare_episode_releases.py", "verify_episode_pair.py", "triage_legacy_archives.py",
+                     "pane_trial.py", "quake_bsp_adapter.py", "quake_cloud_sky.py", "quake_trigger_routes.py", "compare_pk3_maps.py", "compare_episode_releases.py", "verify_episode_pair.py", "triage_legacy_archives.py",
                      "compare_visual_captures.py", "walkway_clearance.py", "walkway_geometry.py"):
             with self.subTest(missing=name):
                 with self.assertRaisesRegex(helper.AcceptanceError, name):
