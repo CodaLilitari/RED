@@ -167,8 +167,9 @@ if (blend_mode == D3DBLEND_SRCALPHA) {
 
 In fixed-camera captures of that conversion, the change removed the outlines around its trees and grass. It
 applies only with Texture filtering on. Other filtered cutouts, such as stock saber tips and explosion sprites,
-get crisper edges. The fix is in a fork of OpenJKDF2 and is proposed to upstream OpenJKDF2. Until a target
-engine carries it, keep the artwork and report the outline as a renderer limitation.
+get crisper edges. The fix is in a fork of OpenJKDF2 and is proposed to upstream OpenJKDF2 in pull request
+[#535](https://github.com/shinyquagsire23/OpenJKDF2/pull/535). Until a target engine carries it, keep the artwork
+and report the outline as a renderer limitation.
 
 ### Light on Things in a one-sector scene
 
@@ -190,8 +191,9 @@ builds a grid of the upward-facing `ARCHLIGHTING` floors. A Thing takes the high
 centre to 0.05 above, sampled bilinearly, and never less than its sector value. The change applies only to JK
 levels that carry `ARCHLIGHTING` records. MotS mode and levels without records are unchanged. In that level a
 player standing in sunlight rose from 0.15 to about 0.81 and stayed at 0.15 in deep shade. It is in the same
-fork and is proposed to upstream OpenJKDF2. Upstream needs the placed-index order described next before it has any
-effect.
+fork and is proposed to upstream OpenJKDF2 in pull request
+[#536](https://github.com/shinyquagsire23/OpenJKDF2/pull/536). Upstream needs the placed-index order described next
+before it has any effect.
 
 Upstream OpenJKDF2 sets a placed Thing's `ARCHLIGHTING` index while reading the JKL and then copies the Thing's
 template over it, which resets the index
